@@ -1,0 +1,44 @@
+# AGENTS.md
+
+## Project Overview
+- Stack: Node.js (Express API) + React (Vite frontend) + Google Gemini File Search (`@google/genai`) + Firebase Firestore persistence.
+- Purpose: Realtime monitoring chatbot that compares theoretical vs actual data and returns verifiable, non-fabricated reports.
+
+## Architecture
+- `server.js` exposes `/api/chat`, `/api/file-search/store`, `/api/file-search/upload`, and `/api/health`.
+- `monitoring-report.js` performs deterministic comparison math (theoretical vs actual) without LLM modification.
+- `search.js` handles Gemini + optional File Search tool usage with strict factual system instructions.
+- `db-firebase.js` writes session/message history to Firestore with write timeouts so API responses are not blocked by Firebase outages/misconfiguration.
+- `client/` contains the React app and calls the Node API.
+- `/api/chat` now returns structured deterministic comparison data (`comparison.rows` + `comparison.summary`) for frontend rendering.
+- `/api/health` includes `uploadMaxMb` so the UI can show active upload limits.
+- `/api/file-search/upload` now returns immediately with `202` and `processingStarted: true` so users can continue chatting while indexing completes.
+- `logger.js` provides shared structured console logging for backend flow tracing.
+
+## Conventions
+- Source links are optional for both deterministic comparison and normal chat requests.
+- Deterministic report mode is used when both `theoreticalData` and `actualData` are provided.
+- Backend validates payload shape and returns explicit actionable errors.
+- Backend logs are structured and include per-request IDs for `/api/*` routes.
+
+## Known Gotchas
+- Express 5 route wildcard `"*"` can fail with `path-to-regexp` v8; use middleware fallback instead.
+- Firestore API may be disabled on a Firebase project by default. In that case writes fail or retry; timeout wrappers prevent hanging requests.
+- `.env` values may contain extra spaces, so env reads should always trim values.
+- Multipart uploads can exceed nominal file size due request overhead; keep a margin above intended max file size.
+
+## Performance Notes
+- Firestore writes are bounded with a short timeout to keep chat latency stable even when DB writes are unavailable.
+
+## Session Log
+- 2026-03-02: Implemented full-stack React + Node chatbot with Gemini File Search integration, deterministic theoretical-vs-actual comparison reporting, mandatory source link validation, and Firestore chat persistence.
+- 2026-03-02: Added safe persistence behavior (write timeouts) after observing Firestore API disabled retries causing long response delays.
+- 2026-03-02: Updated request validation so deterministic comparison can run without source links, while normal LLM chat still requires at least one valid source URL.
+- 2026-03-02: Added formatted comparison rendering in React (table + summary + source section) using structured payload from backend instead of only raw markdown text.
+- 2026-03-02: Added upload limit visibility in UI from `/api/health`; oversized file uploads return JSON error with current max MB.
+- 2026-03-02: Removed source-link gating in frontend/backend for normal chat; users can chat with file-search context without manually entering links.
+- 2026-03-02: Added upload processing UX (loader + explicit status message) and switched upload API to async-start semantics (`202 Accepted`).
+- 2026-03-03: Added structured backend logging with request lifecycle events, route-level flow logs, and centralized logger toggles (`BACKEND_LOGS`, `BACKEND_LOG_MAX_STRING`).
+- 2026-03-03: Improved assistant message formatting by rendering markdown (lists/headings/tables) in the chat UI instead of plain raw text.
+- 2026-03-03: Added data-driven suggested questions endpoint (`/api/suggestions`) and UI panel with refresh + click-to-fill prompts.
+- 2026-03-03: Strengthened suggested-question parser to handle fenced JSON responses safely.
