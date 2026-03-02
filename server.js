@@ -22,6 +22,10 @@ const {
   buildDeterministicReport,
   normalizeSourceLinks,
 } = require("./monitoring-report");
+const {
+  listFileSearchStores,
+  upsertFileSearchStore,
+} = require("./store-history");
 
 const app = express();
 const logger = createLogger("server");
@@ -163,6 +167,19 @@ app.post("/api/file-search/store", async (req, res) => {
 
     const store = await createFileSearchStore(displayName);
 
+    try {
+      await upsertFileSearchStore({
+        fileSearchStoreName: store.name,
+        displayName: store.displayName || displayName || store.name,
+      });
+    } catch (historyError) {
+      logger.warn("file_search.store.history_upsert_failed", {
+        requestId,
+        fileSearchStoreName: store.name,
+        error: historyError.message,
+      });
+    }
+
     logger.info("file_search.store.create.success", {
       requestId,
       fileSearchStoreName: store.name,
@@ -181,6 +198,33 @@ app.post("/api/file-search/store", async (req, res) => {
 
     return res.status(500).json({
       error: error.message || "Failed to create file search store.",
+    });
+  }
+});
+
+app.get("/api/file-search/stores", async (req, res) => {
+  const requestId = req.requestId || null;
+
+  try {
+    const limit = req.query?.limit;
+    const stores = await listFileSearchStores({ limit });
+
+    logger.info("file_search.store.list.success", {
+      requestId,
+      count: stores.length,
+    });
+
+    return res.json({
+      stores,
+    });
+  } catch (error) {
+    logger.error("file_search.store.list.failed", {
+      requestId,
+      error: error.message,
+    });
+
+    return res.status(500).json({
+      error: error.message || "Failed to list file search stores.",
     });
   }
 });
@@ -228,6 +272,19 @@ app.post("/api/file-search/upload", upload.single("file"), async (req, res) => {
       mimeType: normalizeUploadMimeType(uploadedFile),
       waitForCompletion: false,
     });
+
+    try {
+      await upsertFileSearchStore({
+        fileSearchStoreName,
+        lastUploadedFileName: uploadedFile.originalname,
+      });
+    } catch (historyError) {
+      logger.warn("file_search.upload.history_upsert_failed", {
+        requestId,
+        fileSearchStoreName,
+        error: historyError.message,
+      });
+    }
 
     logger.info("file_search.upload.accepted", {
       requestId,
@@ -282,6 +339,22 @@ app.post("/api/suggestions", async (req, res) => {
       fileSearchStoreName,
       sourceLinks,
     });
+
+    if (fileSearchStoreName) {
+      try {
+        await upsertFileSearchStore({
+          fileSearchStoreName,
+          queryIncrement: 0,
+          suggestionIncrement: 1,
+        });
+      } catch (historyError) {
+        logger.warn("suggestions.history_upsert_failed", {
+          requestId,
+          fileSearchStoreName,
+          error: historyError.message,
+        });
+      }
+    }
 
     logger.info("suggestions.request.success", {
       requestId,
@@ -393,6 +466,22 @@ app.post("/api/chat", async (req, res) => {
       sourceLinks,
       fileSearchStoreName,
     });
+
+    if (fileSearchStoreName) {
+      try {
+        await upsertFileSearchStore({
+          fileSearchStoreName,
+          queryIncrement: 1,
+        });
+      } catch (historyError) {
+        logger.warn("chat.request.history_upsert_failed", {
+          requestId,
+          sessionId,
+          fileSearchStoreName,
+          error: historyError.message,
+        });
+      }
+    }
 
     if (persistence.saved) {
       logger.info("chat.request.persistence_saved", {

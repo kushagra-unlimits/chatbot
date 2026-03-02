@@ -80,12 +80,14 @@ label {
 }
 
 input,
+select,
 textarea,
 button {
   font-family: inherit;
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -136,6 +138,12 @@ button:disabled {
 
 .secondary-btn:hover:not(:disabled) {
   background: #dbe9ee;
+}
+
+.store-meta {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .chat {
@@ -309,20 +317,30 @@ button:disabled {
   gap: 0.45rem;
 }
 
-.suggestion-chip {
-  text-align: left;
+.suggestion-item {
   border: 1px solid #c7dce3;
   background: #ffffff;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem 0.6rem;
+}
+
+.suggestion-item p {
+  margin: 0;
   color: #203640;
   font-size: 0.86rem;
   font-weight: 500;
-  border-radius: 10px;
-  padding: 0.55rem 0.65rem;
 }
 
-.suggestion-chip:hover:not(:disabled) {
-  background: #eff7fa;
-  border-color: #aacdd9;
+.suggestion-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+
+.suggestion-actions button {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  border-radius: 8px;
 }
 
 .comparison-view {

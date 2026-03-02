@@ -60,6 +60,7 @@ function getStatusLabel(status) {
 export default function App() {
   const [sessionId, setSessionId] = useState("");
   const [fileSearchStoreName, setFileSearchStoreName] = useState("");
+  const [storeHistory, setStoreHistory] = useState([]);
   const [storeDisplayName, setStoreDisplayName] = useState("realtime-monitoring-store");
   const [sourceLinksText, setSourceLinksText] = useState("");
   const [theoreticalJson, setTheoreticalJson] = useState("");
@@ -74,8 +75,38 @@ export default function App() {
   const [isCreatingStore, setIsCreatingStore] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [isLoadingStoreHistory, setIsLoadingStoreHistory] = useState(false);
 
   const sourceLinks = useMemo(() => toSourceLinks(sourceLinksText), [sourceLinksText]);
+  const selectedStore = useMemo(
+    () =>
+      storeHistory.find(
+        (store) => store.fileSearchStoreName === fileSearchStoreName,
+      ) || null,
+    [storeHistory, fileSearchStoreName],
+  );
+
+  async function loadStoreHistory(preferredStoreName = null) {
+    setIsLoadingStoreHistory(true);
+
+    try {
+      const response = await fetch(`${apiBase}/api/file-search/stores?limit=100`);
+      const payload = await parseResponse(response);
+      const stores = payload.stores || [];
+      setStoreHistory(stores);
+
+      const preferred = String(preferredStoreName || "").trim();
+      if (preferred) {
+        setFileSearchStoreName(preferred);
+      } else if (!fileSearchStoreName && stores.length > 0) {
+        setFileSearchStoreName(stores[0].fileSearchStoreName);
+      }
+    } catch (error) {
+      setStatusText(error.message);
+    } finally {
+      setIsLoadingStoreHistory(false);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -97,6 +128,7 @@ export default function App() {
     }
 
     loadHealth();
+    loadStoreHistory();
 
     return () => {
       mounted = false;
@@ -147,6 +179,7 @@ export default function App() {
       const payload = await parseResponse(response);
       setFileSearchStoreName(payload.fileSearchStoreName || "");
       setStatusText(`Store ready: ${payload.fileSearchStoreName}`);
+      loadStoreHistory(payload.fileSearchStoreName || null);
     } catch (error) {
       setStatusText(error.message);
     } finally {
@@ -189,6 +222,7 @@ export default function App() {
       if (resolvedStoreName) {
         setFileSearchStoreName(resolvedStoreName);
         loadSuggestedQuestions(resolvedStoreName);
+        loadStoreHistory(resolvedStoreName);
       }
       setSelectedFile(null);
     } catch (error) {
@@ -198,12 +232,14 @@ export default function App() {
     }
   }
 
-  async function sendMessage(event) {
-    event.preventDefault();
-
-    const trimmedMessage = message.trim();
+  async function sendChatRequest({
+    messageOverride = null,
+    llmOnly = false,
+  } = {}) {
+    const trimmedMessage =
+      typeof messageOverride === "string" ? messageOverride.trim() : message.trim();
     const hasComparisonPayload =
-      theoreticalJson.trim().length > 0 && actualJson.trim().length > 0;
+      !llmOnly && theoreticalJson.trim().length > 0 && actualJson.trim().length > 0;
 
     if (!trimmedMessage && !hasComparisonPayload) {
       setStatusText("Enter a message or provide both theoretical and actual JSON data.");
@@ -259,6 +295,9 @@ export default function App() {
       ]);
       setStatusText(`Done (${result.mode})`);
       setMessage("");
+      if (fileSearchStoreName.trim()) {
+        loadStoreHistory(fileSearchStoreName.trim());
+      }
     } catch (error) {
       setMessages((prev) => [
         ...prev,
@@ -271,6 +310,22 @@ export default function App() {
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function sendMessage(event) {
+    event.preventDefault();
+    await sendChatRequest();
+  }
+
+  async function runSuggestedQuestion(question) {
+    if (isSending) {
+      return;
+    }
+
+    await sendChatRequest({
+      messageOverride: question,
+      llmOnly: true,
+    });
   }
 
   return (
@@ -326,7 +381,36 @@ export default function App() {
             <button type="button" onClick={createStore} disabled={isCreatingStore}>
               {isCreatingStore ? "Creating..." : "Create Store"}
             </button>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => loadStoreHistory()}
+              disabled={isLoadingStoreHistory}
+            >
+              {isLoadingStoreHistory ? "Loading stores..." : "Refresh stores"}
+            </button>
           </div>
+
+          <label htmlFor="store-history">Store history</label>
+          <select
+            id="store-history"
+            value={fileSearchStoreName}
+            onChange={(event) => {
+              const selectedName = event.target.value;
+              setFileSearchStoreName(selectedName);
+              if (selectedName) {
+                setStatusText(`Selected store: ${selectedName}`);
+                loadSuggestedQuestions(selectedName);
+              }
+            }}
+          >
+            <option value="">Select a store from history</option>
+            {storeHistory.map((store) => (
+              <option key={store.fileSearchStoreName} value={store.fileSearchStoreName}>
+                {(store.displayName || store.fileSearchStoreName).slice(0, 46)}
+              </option>
+            ))}
+          </select>
 
           <label htmlFor="store-name">Store name</label>
           <input
@@ -335,6 +419,11 @@ export default function App() {
             onChange={(event) => setFileSearchStoreName(event.target.value)}
             placeholder="filesearchstores/123456"
           />
+          {selectedStore ? (
+            <p className="store-meta">
+              Uploads: {selectedStore.uploadCount || 0} | Queries: {selectedStore.queryCount || 0}
+            </p>
+          ) : null}
 
           <input
             type="file"
@@ -374,15 +463,27 @@ export default function App() {
             ) : (
               <div className="suggestion-list">
                 {suggestedQuestions.map((question, index) => (
-                  <button
-                    key={`${question}-${index}`}
-                    type="button"
-                    className="suggestion-chip"
-                    onClick={() => setMessage(question)}
-                    title="Click to use this question"
-                  >
-                    {question}
-                  </button>
+                  <div key={`${question}-${index}`} className="suggestion-item">
+                    <p>{question}</p>
+                    <div className="suggestion-actions">
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => setMessage(question)}
+                        title="Fill the input"
+                      >
+                        Use
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runSuggestedQuestion(question)}
+                        disabled={isSending}
+                        title="Run this query now"
+                      >
+                        Run
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
